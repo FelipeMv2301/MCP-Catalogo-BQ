@@ -1,12 +1,12 @@
 import os
+from urllib.parse import parse_qs
 import uvicorn
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
-from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 from src.catalog import get_catalog
 from src.search import buscar
 from src.schemas import SearchResult
@@ -85,20 +85,42 @@ async def consultar_compatibilidad_catalogo(
     return result.model_dump_json()
 
 
-class _AuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/health":
-            return await call_next(request)
-        if _MCP_API_KEY:
-            auth = request.headers.get("Authorization", "")
-            provided = (
-                auth.removeprefix("Bearer ").strip()
-                if auth.startswith("Bearer ")
-                else request.query_params.get("api_key", "")
-            )
-            if provided != _MCP_API_KEY:
-                return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        return await call_next(request)
+class _AuthMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+
+        if path == "/health" or not _MCP_API_KEY:
+            await self.app(scope, receive, send)
+            return
+
+        query_string = scope.get("query_string", b"").decode()
+        params = parse_qs(query_string)
+
+        # /messages/ with session_id: session was already authenticated via SSE
+        if path.startswith("/messages/") and params.get("session_id"):
+            await self.app(scope, receive, send)
+            return
+
+        headers = {k: v for k, v in scope.get("headers", [])}
+        auth_header = headers.get(b"authorization", b"").decode()
+        if auth_header.startswith("Bearer "):
+            provided = auth_header.removeprefix("Bearer ").strip()
+        else:
+            provided = params.get("api_key", [""])[0]
+
+        if provided != _MCP_API_KEY:
+            resp = Response('{"error":"Unauthorized"}', status_code=401, media_type="application/json")
+            await resp(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
 
 
 async def _health(request: Request) -> PlainTextResponse:
@@ -110,11 +132,9 @@ if __name__ == "__main__":
 
     if transport == "sse":
         port = int(os.environ.get("PORT", 8000))
-        app = Starlette(
-            routes=[Route("/health", _health)],
-            middleware=[Middleware(_AuthMiddleware)],
-        )
-        app.mount("/", mcp.sse_app())
+        starlette_app = Starlette(routes=[Route("/health", _health)])
+        starlette_app.mount("/", mcp.sse_app())
+        app = _AuthMiddleware(starlette_app)
         uvicorn.run(app, host="0.0.0.0", port=port)
     else:
         mcp.run(transport="stdio")
