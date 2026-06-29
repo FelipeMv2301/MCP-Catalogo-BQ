@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "catalogo-bioquimica": {
+      "type": "stdio",
+      "command": "python3",
+      "args": ["server.py"],
+      "env": {
+        "PYTHONPATH": "/home/felipemv2301/Escritorio/Proyectos/Proyectos-BQ/mcp-catalogo-bq"
+      }
+    }
+  }
+}
