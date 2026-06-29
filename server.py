@@ -15,6 +15,7 @@ _MCP_API_KEY = os.environ.get("MCP_API_KEY", "")
 
 mcp = FastMCP(
     name="catalogo-bioquimica",
+    host="0.0.0.0",
     instructions="""
     Servidor MCP del catálogo de productos de Bioquímica CL.
 
