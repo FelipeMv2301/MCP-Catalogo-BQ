@@ -6,7 +6,7 @@ COPY pyproject.toml .
 COPY src/ ./src/
 COPY server.py .
 
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
 
 ENV MCP_TRANSPORT=sse
 ENV PORT=8000
