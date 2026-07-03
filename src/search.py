@@ -27,10 +27,20 @@ def tokenizar(texto: str) -> list[str]:
     return [t for t in tokens if len(t) >= 2]
 
 
-def texto_busqueda(item: dict) -> str:
-    desc = limpiar_descripcion(item.get("woo_description") or "")
+def nombre_completo(item: dict) -> str:
+    # SAP ItemName ("name") viene truncado a un campo corto; ForeignName
+    # ("description") trae el nombre extendido. Usamos el más largo.
     name = (item.get("name") or "").strip()
-    return f"{name} {desc}" if desc else name
+    desc = (item.get("description") or "").strip()
+    return desc if len(desc) > len(name) else name
+
+
+def texto_busqueda(item: dict) -> str:
+    woo = limpiar_descripcion(item.get("woo_description") or "")
+    desc = (item.get("description") or "").strip()
+    name = nombre_completo(item)
+    partes = [p for p in (name, desc, woo) if p]
+    return " ".join(partes)
 
 
 def score_item(query_norm: str, query_tokens: list[str], texto_norm: str) -> float:
@@ -58,17 +68,22 @@ def buscar(
     scored: list[tuple[float, CatalogItem]] = []
 
     for raw in items:
-        nombre = raw.get("name", "") or ""
+        nombre = nombre_completo(raw)
         texto_norm = normalizar(texto_busqueda(raw))
         sc = score_item(query_norm, query_tokens, texto_norm)
         if sc < umbral:
             continue
 
         stock = (raw.get("stock_01") or 0) + (raw.get("stock_11") or 0)
+        especificaciones = (
+            limpiar_descripcion(raw.get("woo_description") or "")
+            or (raw.get("description") or "").strip()
+            or nombre
+        )
         item = CatalogItem(
             sku=raw.get("sku", ""),
             nombre_comercial=nombre,
-            especificaciones_tecnicas=limpiar_descripcion(raw.get("woo_description") or "") or nombre,
+            especificaciones_tecnicas=especificaciones,
             precio_lista_neto=raw.get("price") or 0.0,
             disponible_para_venta=stock > 0,
         )
