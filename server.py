@@ -53,6 +53,8 @@ async def consultar_compatibilidad_catalogo(
                          Estado está solicitando. Puede incluir errores
                          ortográficos o abreviaciones.
         limite_resultados: Cantidad máxima de candidatos a retornar (default 3).
+                            Usa 0 para retornar TODOS los candidatos compatibles
+                            sin límite (ej. cuando te pidan "todos los X").
 
     Returns:
         JSON con array de productos candidatos ordenados por afinidad técnica.
@@ -67,7 +69,8 @@ async def consultar_compatibilidad_catalogo(
         )
         return result.model_dump_json()
 
-    encontrados = buscar(item_solicitado, items, limite=limite_resultados)
+    limite = limite_resultados if limite_resultados > 0 else len(items)
+    encontrados = buscar(item_solicitado, items, limite=limite)
 
     if not encontrados:
         result = SearchResult(
