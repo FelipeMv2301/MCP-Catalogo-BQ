@@ -69,10 +69,17 @@ def buscar(
 
     for raw in items:
         nombre = nombre_completo(raw)
-        texto_norm = normalizar(texto_busqueda(raw))
-        sc = score_item(query_norm, query_tokens, texto_norm)
-        if sc < umbral:
-            continue
+        sku_norm = normalizar(raw.get("sku") or "")
+
+        # Match exacto de SKU: prioridad absoluta, sin pasar por el umbral fuzzy.
+        # Permite buscar por código de producto además del nombre comercial.
+        if sku_norm and sku_norm == query_norm:
+            sc = 1.0
+        else:
+            texto_norm = normalizar(texto_busqueda(raw))
+            sc = score_item(query_norm, query_tokens, texto_norm)
+            if sc < umbral:
+                continue
 
         stock = (raw.get("stock_01") or 0) + (raw.get("stock_11") or 0)
         especificaciones = (
