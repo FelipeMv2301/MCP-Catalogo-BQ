@@ -1,16 +1,18 @@
 import time
 import os
 import httpx
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # extra="ignore": el mismo .env trae MCP_API_KEY/MCP_TRANSPORT/PORT para
+    # el transporte (los lee server.py directo de os.environ) — sin esto,
+    # Settings() falla con "Extra inputs are not permitted".
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     catalog_api_url: str
     catalog_api_key: str
     cache_ttl_seconds: int = 900
-
-    class Config:
-        env_file = ".env"
 
 
 settings = Settings()
