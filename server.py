@@ -7,8 +7,8 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
-from src.catalog import get_catalog
-from src.search import buscar
+from src.catalog import get_catalog, get_producto_por_sku
+from src.search import buscar, construir_item
 from src.schemas import SearchResult
 
 _MCP_API_KEY = os.environ.get("MCP_API_KEY", "")
@@ -83,6 +83,48 @@ async def consultar_compatibilidad_catalogo(
             resultados=encontrados,
             total_encontrados=len(encontrados),
             mensaje="",
+        )
+
+    return result.model_dump_json()
+
+
+@mcp.tool()
+async def consultar_producto_por_sku(sku: str) -> str:
+    """
+    Busca un producto por su SKU EXACTO en el catálogo de Bioquímica CL,
+    consultando el dato más fresco posible directo a Stock-Service — sin
+    pasar por el caché de 15 minutos que usa consultar_compatibilidad_catalogo.
+
+    Úsala cuando ya tengas el SKU exacto (de una búsqueda previa con
+    consultar_compatibilidad_catalogo, de una licitación anterior, o porque
+    te lo dieron directamente) y necesites confirmar precio o stock
+    actualizado antes de cotizar. Para buscar por nombre o descripción
+    técnica cuando NO tienes el SKU, usa consultar_compatibilidad_catalogo.
+
+    Args:
+        sku: Código de producto exacto (ej. "EE000013"). No es fuzzy — si
+             el SKU no calza exactamente, no encuentra nada.
+
+    Returns:
+        JSON con el producto si existe, o mensaje indicando que no se encontró.
+    """
+    try:
+        raw = await get_producto_por_sku(sku)
+    except Exception as e:
+        result = SearchResult(
+            resultados=[], total_encontrados=0,
+            mensaje=f"Error al consultar Stock-Service: {e}",
+        )
+        return result.model_dump_json()
+
+    if raw is None:
+        result = SearchResult(
+            resultados=[], total_encontrados=0,
+            mensaje=f"No se encontró el SKU '{sku}' en el catálogo.",
+        )
+    else:
+        result = SearchResult(
+            resultados=[construir_item(raw)], total_encontrados=1, mensaje="",
         )
 
     return result.model_dump_json()

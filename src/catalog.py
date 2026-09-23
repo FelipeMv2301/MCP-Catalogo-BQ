@@ -40,3 +40,28 @@ async def get_catalog() -> list[dict]:
     _cache = data.get("items", [])
     _cache_timestamp = now
     return _cache
+
+
+async def get_producto_por_sku(sku: str) -> dict | None:
+    """Lookup exacto y SIN caché — llama a Stock-Service directo, para cuando ya se conoce el SKU
+    y se necesita el dato más fresco posible (precio/stock), sin esperar al TTL de get_catalog().
+
+    `search=sku` en Stock-Service es un AND por palabras, no un match exacto — un SKU como
+    "EE000023" puede traer también "EE000023NA" (substring). Por eso se filtra acá por igualdad
+    exacta (case-insensitive) sobre los resultados antes de devolver."""
+    sku_norm = sku.strip().upper()
+    if not sku_norm:
+        return None
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(
+            settings.catalog_api_url,
+            params={"search": sku_norm, "limit": 20},
+            headers={"X-API-Key": settings.catalog_api_key},
+        )
+        response.raise_for_status()
+
+    for item in response.json().get("items", []):
+        if (item.get("sku") or "").strip().upper() == sku_norm:
+            return item
+    return None

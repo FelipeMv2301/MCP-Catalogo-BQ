@@ -8,6 +8,17 @@ _RE_HTML_TAGS = re.compile(r"<[^>]+>")
 _RE_ASTERISK_LINES = re.compile(r"\*[^\n]*")
 _RE_WHITESPACE = re.compile(r"\s+")
 
+# Palabras vacías del español: sin filtrarlas, diluían token_score (comunes/len(query_tokens))
+# porque contaban en el denominador aunque no aportaran nada al match — un query como "guantes de
+# nitrilo para laboratorio" repartía puntaje entre 5 tokens cuando solo 3 son informativos, y
+# productos que casualmente comparten "de"/"para" ganaban puntaje espurio. Lista acotada a
+# conectores comunes, no a un diccionario NLP completo — ya normalizada (sin tildes, minúscula).
+STOPWORDS_ES = frozenset({
+    "de", "del", "la", "el", "los", "las", "un", "una", "unos", "unas",
+    "y", "o", "u", "a", "al", "en", "con", "sin", "por", "para",
+    "que", "se", "su", "sus", "es", "son", "como",
+})
+
 
 def limpiar_descripcion(texto: str) -> str:
     texto = html.unescape(texto)
@@ -24,7 +35,7 @@ def normalizar(texto: str) -> str:
 def tokenizar(texto: str) -> list[str]:
     # split on non-alphanumeric AND on digit↔letter boundaries ("100ml" → ["100","ml"])
     tokens = re.split(r"[\s\-\W]+|(?<=\d)(?=[a-zA-Z])|(?<=[a-zA-Z])(?=\d)", texto)
-    return [t for t in tokens if len(t) >= 2]
+    return [t for t in tokens if len(t) >= 2 and t not in STOPWORDS_ES]
 
 
 def nombre_completo(item: dict) -> str:
@@ -41,6 +52,23 @@ def texto_busqueda(item: dict) -> str:
     name = nombre_completo(item)
     partes = [p for p in (name, desc, woo) if p]
     return " ".join(partes)
+
+
+def construir_item(raw: dict) -> CatalogItem:
+    nombre = nombre_completo(raw)
+    stock = (raw.get("stock_01") or 0) + (raw.get("stock_11") or 0)
+    especificaciones = (
+        limpiar_descripcion(raw.get("woo_description") or "")
+        or (raw.get("description") or "").strip()
+        or nombre
+    )
+    return CatalogItem(
+        sku=raw.get("sku", ""),
+        nombre_comercial=nombre,
+        especificaciones_tecnicas=especificaciones,
+        precio_lista_neto=raw.get("price") or 0.0,
+        disponible_para_venta=stock > 0,
+    )
 
 
 def score_item(query_norm: str, query_tokens: list[str], texto_norm: str) -> float:
@@ -68,7 +96,6 @@ def buscar(
     scored: list[tuple[float, CatalogItem]] = []
 
     for raw in items:
-        nombre = nombre_completo(raw)
         sku_norm = normalizar(raw.get("sku") or "")
 
         # Match exacto de SKU: prioridad absoluta, sin pasar por el umbral fuzzy.
@@ -81,20 +108,7 @@ def buscar(
             if sc < umbral:
                 continue
 
-        stock = (raw.get("stock_01") or 0) + (raw.get("stock_11") or 0)
-        especificaciones = (
-            limpiar_descripcion(raw.get("woo_description") or "")
-            or (raw.get("description") or "").strip()
-            or nombre
-        )
-        item = CatalogItem(
-            sku=raw.get("sku", ""),
-            nombre_comercial=nombre,
-            especificaciones_tecnicas=especificaciones,
-            precio_lista_neto=raw.get("price") or 0.0,
-            disponible_para_venta=stock > 0,
-        )
-        scored.append((sc, item))
+        scored.append((sc, construir_item(raw)))
 
     scored.sort(key=lambda x: x[0], reverse=True)
     return [item for _, item in scored[:limite]]
